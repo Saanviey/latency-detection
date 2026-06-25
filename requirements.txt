@@ -2,3 +2,5 @@ fastapi
 uvicorn
 starlette
 tdigest
+httpx
+python-dotenv

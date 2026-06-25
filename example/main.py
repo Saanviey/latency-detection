@@ -3,6 +3,12 @@ from latency_tracker import LatencyMiddleware, latency_router, init_db, startup 
 import asyncio 
 import random
 from contextlib import asynccontextmanager
+import os
+from dotenv import load_dotenv
+from latency_tracker import configure_llm
+
+load_dotenv()
+configure_llm("groq", os.getenv("GROQ_API_KEY"))
 
 #Everything before yield runs on startup, everything after runs on shutdown.
 @asynccontextmanager
@@ -12,7 +18,6 @@ async def lifespan(app):
     shutdown()
 
 app = FastAPI(lifespan=lifespan)
-
 
 init_db()  # creates the SQLite table on startup
 app.add_middleware(LatencyMiddleware)

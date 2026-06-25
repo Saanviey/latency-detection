@@ -1,0 +1,536 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>latency tracker</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg: #f4f3f0;
+    --surface: #ffffff;
+    --surface-2: #f0eeea;
+    --border: #e2e0db;
+    --border-strong: #c8c5be;
+    --text: #1a1916;
+    --text-muted: #9a9890;
+    --text-secondary: #5a5855;
+    --ok: #2d7a4f;
+    --ok-bg: #edf7f1;
+    --ok-border: #b6dfc8;
+    --warn: #92640a;
+    --warn-bg: #fdf6e3;
+    --warn-border: #e8cc88;
+    --danger: #b03030;
+    --danger-bg: #fdf0f0;
+    --danger-border: #e8b0b0;
+    --accent: #4a5568;
+    --font-mono: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace;
+    --font-sans: 'Inter', system-ui, sans-serif;
+  }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--font-sans);
+    font-size: 14px;
+    line-height: 1.6;
+    min-height: 100vh;
+  }
+
+  .shell {
+    max-width: 1100px;
+    margin: 0 auto;
+    padding: 2rem 1.5rem;
+  }
+
+  .header {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    margin-bottom: 1.5rem;
+    padding-bottom: 1rem;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .header-left { display: flex; align-items: baseline; gap: 0.75rem; }
+
+  .wordmark {
+    font-family: var(--font-mono);
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--text-secondary);
+    letter-spacing: 0.02em;
+  }
+
+  .wordmark span { color: var(--text); }
+
+  .last-checked {
+    font-size: 12px;
+    color: var(--text-muted);
+    font-family: var(--font-mono);
+  }
+
+  .status-bar {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.6rem 0.9rem;
+    font-size: 13px;
+    margin-bottom: 1.5rem;
+    border-left: 3px solid;
+    background: var(--surface);
+    border-radius: 0 4px 4px 0;
+  }
+
+  .status-bar.healthy { border-left-color: var(--ok); color: var(--ok); }
+  .status-bar.warning { border-left-color: var(--warn); color: var(--warn); }
+  .status-bar.degraded { border-left-color: var(--danger); color: var(--danger); }
+
+  .status-dot {
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    background: currentColor;
+    flex-shrink: 0;
+  }
+
+  .section-label {
+    font-size: 11px;
+    font-family: var(--font-mono);
+    color: var(--text-muted);
+    letter-spacing: 0.06em;
+    margin-bottom: 0.6rem;
+    text-transform: uppercase;
+  }
+
+  .table-wrap {
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    overflow: hidden;
+    margin-bottom: 1.5rem;
+    background: var(--surface);
+  }
+
+  table { width: 100%; border-collapse: collapse; }
+
+  thead tr {
+    background: var(--surface-2);
+    border-bottom: 1px solid var(--border);
+  }
+
+  th {
+    padding: 0.6rem 1rem;
+    text-align: left;
+    font-size: 11px;
+    font-family: var(--font-mono);
+    color: var(--text-muted);
+    letter-spacing: 0.05em;
+    font-weight: 400;
+    white-space: nowrap;
+  }
+
+  th:not(:first-child) { text-align: right; }
+
+  tbody tr {
+    border-bottom: 1px solid var(--border);
+    cursor: pointer;
+    transition: background 0.1s;
+    border-left: 3px solid transparent;
+  }
+
+  tbody tr:last-child { border-bottom: none; }
+  tbody tr:hover { background: var(--bg); }
+
+  td {
+    padding: 0 1rem;
+    vertical-align: middle;
+    font-family: var(--font-mono);
+    font-size: 13px;
+    color: var(--text);
+  }
+
+  td:not(:first-child) { text-align: right; }
+
+  .ep-cell { padding: 0.7rem 1rem; }
+
+  .ep-name {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-bottom: 0.3rem;
+  }
+
+  .method-badge {
+    font-size: 10px;
+    font-family: var(--font-mono);
+    font-weight: 600;
+    padding: 1px 5px;
+    border-radius: 2px;
+    letter-spacing: 0.03em;
+  }
+
+  .method-GET { background: #dbeafe; color: #1e40af; }
+  .method-POST { background: #dcfce7; color: #166534; }
+  .method-PUT { background: #fef9c3; color: #854d0e; }
+  .method-DELETE { background: #fee2e2; color: #991b1b; }
+  .method-PATCH { background: #ede9fe; color: #5b21b6; }
+
+  .ep-path { font-size: 13px; color: var(--text); }
+
+  .ep-meta {
+    font-size: 11px;
+    color: var(--text-muted);
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    margin-top: 0.25rem;
+  }
+
+  .sample-warn { color: var(--warn); }
+
+  .dist-bar-wrap {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    margin-top: 0.35rem;
+  }
+
+  .dist-bar {
+    height: 3px;
+    border-radius: 0;
+    background: var(--border);
+    position: relative;
+    width: 120px;
+    overflow: hidden;
+  }
+
+  .dist-bar-fill {
+    position: absolute;
+    top: 0; left: 0;
+    height: 100%;
+  }
+
+  .dist-label {
+    font-size: 10px;
+    color: var(--text-muted);
+    font-family: var(--font-mono);
+  }
+
+  .val-warn { color: var(--warn); }
+  .val-danger { color: var(--danger); }
+  .val-ok { color: var(--text); }
+
+  .trend-up { color: var(--warn); }
+  .trend-down { color: var(--ok); }
+  .trend-flat { color: var(--text-muted); }
+  .trend-danger { color: var(--danger); }
+
+  .status-badge {
+    display: inline-flex;
+    align-items: center;
+    padding: 1px 7px;
+    border-radius: 2px;
+    font-size: 11px;
+    font-family: var(--font-mono);
+    border: 1px solid;
+    white-space: nowrap;
+  }
+
+  .badge-ok { background: var(--ok-bg); border-color: var(--ok-border); color: var(--ok); }
+  .badge-warning { background: var(--warn-bg); border-color: var(--warn-border); color: var(--warn); }
+  .badge-degraded { background: var(--danger-bg); border-color: var(--danger-border); color: var(--danger); }
+
+  .summary-section { margin-bottom: 1.5rem; }
+
+  .summary-box {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 1rem 1.25rem;
+    font-size: 13px;
+    color: var(--text-secondary);
+    line-height: 1.8;
+    min-height: 72px;
+    display: flex;
+    align-items: center;
+  }
+
+  .summary-box.loading { color: var(--text-muted); font-style: italic; }
+  .summary-box.error { color: var(--danger); }
+
+  .summary-controls {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    margin-top: 0.75rem;
+  }
+
+  .btn {
+    padding: 0.4rem 0.85rem;
+    border-radius: 4px;
+    font-size: 12px;
+    font-family: var(--font-mono);
+    cursor: pointer;
+    border: 1px solid var(--border-strong);
+    background: var(--surface);
+    color: var(--text-secondary);
+    transition: all 0.1s;
+    letter-spacing: 0.02em;
+  }
+
+  .btn:hover { background: var(--surface-2); color: var(--text); border-color: var(--border-strong); }
+  .btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+  .legend {
+    display: flex;
+    align-items: center;
+    gap: 1.5rem;
+    flex-wrap: wrap;
+    padding-top: 1rem;
+    border-top: 1px solid var(--border);
+  }
+
+  .legend-item {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    font-size: 11px;
+    color: var(--text-muted);
+    font-family: var(--font-mono);
+  }
+
+  .legend-dot {
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+
+  .empty-state {
+    padding: 3rem;
+    text-align: center;
+    color: var(--text-muted);
+    font-family: var(--font-mono);
+    font-size: 13px;
+  }
+
+  .error-state {
+    padding: 2rem;
+    text-align: center;
+    color: var(--danger);
+    font-family: var(--font-mono);
+    font-size: 13px;
+  }
+</style>
+</head>
+<body>
+<div class="shell">
+
+  <div class="header">
+    <div class="header-left">
+      <span class="wordmark">latency<span>.</span>tracker</span>
+    </div>
+    <span class="last-checked" id="last-checked">—</span>
+  </div>
+
+  <div class="status-bar healthy" id="status-bar">
+    <span class="status-dot"></span>
+    <span id="status-text">loading...</span>
+  </div>
+
+  <div class="section-label">endpoints — sorted by avg</div>
+
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>endpoint</th>
+          <th>avg</th>
+          <th>p50</th>
+          <th>p95</th>
+          <th>p99</th>
+          <th>samples</th>
+          <th>errors</th>
+          <th>trend</th>
+          <th>status</th>
+        </tr>
+      </thead>
+      <tbody id="table-body">
+        <tr><td colspan="9" class="empty-state">loading endpoints...</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="summary-section">
+    <div class="section-label">ai summary</div>
+    <div class="summary-box" id="summary-box">
+      hit generate to analyse current endpoint health.
+    </div>
+    <div class="summary-controls">
+      <button class="btn" id="generate-btn" onclick="generateSummary()">↗ generate summary</button>
+      <span id="summary-status" style="font-size:11px; color: var(--text-muted); font-family: var(--font-mono);"></span>
+    </div>
+  </div>
+
+  <div class="legend">
+    <div class="legend-item"><span class="legend-dot" style="background:var(--ok)"></span> ok</div>
+    <div class="legend-item"><span class="legend-dot" style="background:var(--warn)"></span> warning — change &gt;20%</div>
+    <div class="legend-item"><span class="legend-dot" style="background:var(--danger)"></span> degraded — change &gt;50%</div>
+    <div class="legend-item">⚠ = percentiles unreliable below 100 samples</div>
+    <div class="legend-item">dist bar — width shows p50→p95→p99 spread. wider = more variance.</div>
+  </div>
+
+</div>
+
+<script>
+  let healthData = [];
+
+  function fmt(ms) {
+    if (ms === null || ms === undefined) return '—';
+    if (ms >= 1000) return (ms / 1000).toFixed(2) + 's';
+    if (ms >= 1) return ms.toFixed(1) + 'ms';
+    return ms.toFixed(3) + 'ms';
+  }
+
+  function latencyClass(ms) {
+    if (ms > 500) return 'val-danger';
+    if (ms > 200) return 'val-warn';
+    return 'val-ok';
+  }
+
+  function trendHtml(degradation) {
+    if (!degradation) return '<span class="trend-flat">→ —</span>';
+    const pct = degradation.change_pct;
+    const abs = Math.abs(pct).toFixed(1);
+    if (pct > 50) return `<span class="trend-danger">↑ ${abs}%</span>`;
+    if (pct > 20) return `<span class="trend-up">↑ ${abs}%</span>`;
+    if (pct < -5) return `<span class="trend-down">↓ ${abs}%</span>`;
+    return `<span class="trend-flat">→ ${abs}%</span>`;
+  }
+
+  function distBarHtml(p50, p95, p99) {
+    if (!p50 || !p99 || p99 === 0) return '';
+    const maxVal = p99 * 1.1;
+    const w50 = Math.min((p50 / maxVal) * 100, 100);
+    const w95 = Math.min((p95 / maxVal) * 100, 100);
+    const w99 = Math.min((p99 / maxVal) * 100, 100);
+    const spread = p99 - p50;
+    const isSpiky = spread > p50 * 2;
+    const color = isSpiky ? 'var(--warn)' : 'var(--accent)';
+    return `
+      <div class="dist-bar-wrap">
+        <div class="dist-bar">
+          <div class="dist-bar-fill" style="width:${w99}%; background: ${color}; opacity:0.25;"></div>
+          <div class="dist-bar-fill" style="width:${w95}%; background: ${color}; opacity:0.5;"></div>
+          <div class="dist-bar-fill" style="width:${w50}%; background: ${color};"></div>
+        </div>
+        <span class="dist-label">${isSpiky ? 'spiky' : 'consistent'}</span>
+      </div>`;
+  }
+
+  function badgeHtml(status) {
+    const map = { ok: 'badge-ok', warning: 'badge-warning', degraded: 'badge-degraded' };
+    return `<span class="status-badge ${map[status] || 'badge-ok'}">${status}</span>`;
+  }
+
+  function renderTable(endpoints) {
+    const tbody = document.getElementById('table-body');
+    if (!endpoints.length) {
+      tbody.innerHTML = '<tr><td colspan="9" class="empty-state">no requests recorded yet.</td></tr>';
+      return;
+    }
+
+    tbody.innerHTML = endpoints.map(ep => {
+      const p = ep.percentiles;
+      const reliable = p && p.percentiles_reliable;
+      const sampleWarn = p && !reliable ? '<span class="sample-warn">⚠ ' + (p.sample_size || 0) + '</span>' : (p ? p.sample_size : '—');
+      const methodClass = `method-${ep.method}`;
+      const url = `/latency/dashboard/detail?method=${encodeURIComponent(ep.method)}&endpoint=${encodeURIComponent(ep.endpoint)}`;
+
+      return `<tr onclick="window.location='${url}'">
+        <td class="ep-cell">
+          <div class="ep-name">
+            <span class="method-badge ${methodClass}">${ep.method}</span>
+            <span class="ep-path">${ep.endpoint}</span>
+          </div>
+          <div class="ep-meta">
+            <span>${ep.total_requests} reqs</span>
+            ${ep.error_count > 0 ? `<span style="color:var(--danger)">${ep.error_count} errors</span>` : ''}
+          </div>
+          ${p ? distBarHtml(p.p50_ms, p.p95_ms, p.p99_ms) : ''}
+        </td>
+        <td class="${latencyClass(ep.avg_ms)}">${fmt(ep.avg_ms)}</td>
+        <td class="${p ? latencyClass(p.p50_ms) : ''}">${p ? fmt(p.p50_ms) : '—'}</td>
+        <td class="${p ? latencyClass(p.p95_ms) : ''}">${p ? fmt(p.p95_ms) : '—'}</td>
+        <td class="${p ? latencyClass(p.p99_ms) : ''}">${p ? fmt(p.p99_ms) : '—'}</td>
+        <td>${sampleWarn}</td>
+        <td>${ep.error_count > 0 ? `<span style="color:var(--danger)">${ep.error_count}</span>` : ep.error_count}</td>
+        <td>${trendHtml(ep.degradation)}</td>
+        <td>${badgeHtml(ep.status)}</td>
+      </tr>`;
+    }).join('');
+  }
+
+  function updateStatusBar(endpoints) {
+    const bar = document.getElementById('status-bar');
+    const text = document.getElementById('status-text');
+    const hasDegraded = endpoints.some(e => e.status === 'degraded');
+    const hasWarning = endpoints.some(e => e.status === 'warning');
+
+    if (hasDegraded) {
+      bar.className = 'status-bar degraded';
+      const count = endpoints.filter(e => e.status === 'degraded').length;
+      text.textContent = `${count} endpoint${count > 1 ? 's' : ''} degraded — action required`;
+    } else if (hasWarning) {
+      bar.className = 'status-bar warning';
+      const count = endpoints.filter(e => e.status === 'warning').length;
+      text.textContent = `${count} endpoint${count > 1 ? 's' : ''} showing warning — monitor closely`;
+    } else {
+      bar.className = 'status-bar healthy';
+      text.textContent = `all systems healthy — ${endpoints.length} endpoints monitored`;
+    }
+  }
+
+  async function loadData() {
+    try {
+      const res = await fetch('/latency/health');
+      const data = await res.json();
+      healthData = data.endpoints || [];
+      renderTable(healthData);
+      updateStatusBar(healthData);
+      document.getElementById('last-checked').textContent = 'last checked: ' + new Date().toLocaleTimeString();
+    } catch (err) {
+      document.getElementById('table-body').innerHTML =
+        '<tr><td colspan="9" class="error-state">failed to load — is the server running?</td></tr>';
+    }
+  }
+
+  async function generateSummary() {
+    const btn = document.getElementById('generate-btn');
+    const box = document.getElementById('summary-box');
+    const statusEl = document.getElementById('summary-status');
+
+    btn.disabled = true;
+    box.className = 'summary-box loading';
+    box.textContent = 'analysing endpoint data...';
+    statusEl.textContent = '';
+
+    try {
+      const res = await fetch('/latency/summary', { method: 'POST' });
+      const data = await res.json();
+      box.className = 'summary-box';
+      box.textContent = data.summary || 'no summary returned.';
+      statusEl.textContent = 'generated ' + new Date().toLocaleTimeString();
+    } catch (err) {
+      box.className = 'summary-box error';
+      box.textContent = 'summary failed — check llm config.';
+    } finally {
+      btn.disabled = false;
+    }
+  }
+
+  loadData();
+  setInterval(loadData, 30000);
+</script>
+</body>
+</html>

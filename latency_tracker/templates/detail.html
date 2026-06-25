@@ -1,0 +1,466 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>endpoint detail — latency tracker</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg: #f4f3f0;
+    --surface: #ffffff;
+    --surface-2: #f0eeea;
+    --border: #e2e0db;
+    --border-strong: #c8c5be;
+    --text: #1a1916;
+    --text-muted: #9a9890;
+    --text-secondary: #5a5855;
+    --ok: #2d7a4f;
+    --ok-bg: #edf7f1;
+    --ok-border: #b6dfc8;
+    --warn: #92640a;
+    --warn-bg: #fdf6e3;
+    --warn-border: #e8cc88;
+    --danger: #b03030;
+    --danger-bg: #fdf0f0;
+    --danger-border: #e8b0b0;
+    --accent: #4a5568;
+    --font-mono: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace;
+    --font-sans: 'Inter', system-ui, sans-serif;
+  }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--font-sans);
+    font-size: 14px;
+    line-height: 1.6;
+    min-height: 100vh;
+  }
+
+  .shell { max-width: 1100px; margin: 0 auto; padding: 2rem 1.5rem; }
+
+  .header {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    margin-bottom: 1.5rem;
+    padding-bottom: 1rem;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .wordmark {
+    font-family: var(--font-mono);
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--text-secondary);
+    letter-spacing: 0.02em;
+  }
+
+  .wordmark span { color: var(--text); }
+
+  .back-link {
+    font-size: 12px;
+    font-family: var(--font-mono);
+    color: var(--text-muted);
+    text-decoration: none;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    margin-bottom: 1rem;
+    transition: color 0.1s;
+  }
+
+  .back-link:hover { color: var(--text-secondary); }
+
+  .ep-header {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    margin-bottom: 1.5rem;
+  }
+
+  .method-badge {
+    font-size: 10px;
+    font-family: var(--font-mono);
+    font-weight: 600;
+    padding: 1px 5px;
+    border-radius: 2px;
+    letter-spacing: 0.03em;
+  }
+
+  .method-GET    { background: #dbeafe; color: #1e40af; }
+  .method-POST   { background: #dcfce7; color: #166534; }
+  .method-PUT    { background: #fef9c3; color: #854d0e; }
+  .method-DELETE { background: #fee2e2; color: #991b1b; }
+  .method-PATCH  { background: #ede9fe; color: #5b21b6; }
+
+  .ep-title {
+    font-size: 20px;
+    font-family: var(--font-mono);
+    font-weight: 500;
+    color: var(--text);
+  }
+
+  /* stat cards */
+  .stat-cards {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+    gap: 0.75rem;
+    margin-bottom: 1.5rem;
+  }
+
+  .stat-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 0.9rem 1rem;
+  }
+
+  .stat-label {
+    font-size: 11px;
+    font-family: var(--font-mono);
+    color: var(--text-muted);
+    letter-spacing: 0.05em;
+    margin-bottom: 0.3rem;
+  }
+
+  .stat-value {
+    font-size: 22px;
+    font-family: var(--font-mono);
+    font-weight: 500;
+    color: var(--text);
+  }
+
+  .stat-value.warn   { color: var(--warn); }
+  .stat-value.danger { color: var(--danger); }
+
+  /* degradation banner */
+  .degradation-banner {
+    padding: 0.75rem 1rem;
+    border-radius: 4px;
+    border: 1px solid;
+    border-left-width: 3px;
+    margin-bottom: 1.5rem;
+    font-family: var(--font-mono);
+    font-size: 12px;
+    line-height: 1.7;
+  }
+
+  .degradation-banner.ok       { background: var(--ok-bg);   border-color: var(--ok-border);   color: var(--ok); }
+  .degradation-banner.warning  { background: var(--warn-bg); border-color: var(--warn-border); color: var(--warn); }
+  .degradation-banner.degraded { background: var(--danger-bg); border-color: var(--danger-border); color: var(--danger); }
+
+  .banner-title  { font-weight: 600; margin-bottom: 0.2rem; }
+  .banner-detail { opacity: 0.8; }
+
+  /* charts */
+  .charts-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1rem;
+    margin-bottom: 1.5rem;
+  }
+
+  @media (max-width: 720px) { .charts-grid { grid-template-columns: 1fr; } }
+
+  .chart-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 1rem 1.25rem;
+  }
+
+  .chart-title {
+    font-size: 11px;
+    font-family: var(--font-mono);
+    color: var(--text-muted);
+    letter-spacing: 0.05em;
+    margin-bottom: 0.75rem;
+  }
+
+  .chart-wrap { position: relative; height: 180px; }
+
+  /* sample info */
+  .sample-info {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 0.9rem 1rem;
+    font-family: var(--font-mono);
+    font-size: 12px;
+    color: var(--text-muted);
+    display: flex;
+    gap: 2rem;
+    flex-wrap: wrap;
+  }
+
+  .sample-info span { display: flex; flex-direction: column; gap: 0.2rem; }
+  .sample-info strong { color: var(--text-secondary); font-weight: 500; }
+
+  .section-label {
+    font-size: 11px;
+    font-family: var(--font-mono);
+    color: var(--text-muted);
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    margin-bottom: 0.6rem;
+  }
+
+  .error-state {
+    padding: 3rem;
+    text-align: center;
+    color: var(--danger);
+    font-family: var(--font-mono);
+    font-size: 13px;
+  }
+</style>
+</head>
+<body>
+<div class="shell">
+
+  <div class="header">
+    <span class="wordmark">latency<span>.</span>tracker</span>
+  </div>
+
+  <a href="/latency/dashboard" class="back-link">← back to dashboard</a>
+
+  <div class="ep-header" id="ep-header">
+    <span style="color:var(--text-muted); font-family:var(--font-mono); font-size:13px;">loading...</span>
+  </div>
+
+  <div class="stat-cards" id="stat-cards"></div>
+
+  <div id="degradation-banner"></div>
+
+  <div class="section-label">latency trend — last 24h (hourly avg)</div>
+  <div class="charts-grid">
+    <div class="chart-card">
+      <div class="chart-title">avg latency per hour</div>
+      <div class="chart-wrap"><canvas id="latency-chart"></canvas></div>
+    </div>
+    <div class="chart-card">
+      <div class="chart-title">error rate per hour</div>
+      <div class="chart-wrap"><canvas id="error-chart"></canvas></div>
+    </div>
+  </div>
+
+  <div class="section-label">sample info</div>
+  <div class="sample-info" id="sample-info">
+    <span><strong>—</strong>total requests</span>
+    <span><strong>—</strong>errors</span>
+    <span><strong>—</strong>samples (tdigest)</span>
+    <span><strong>—</strong>percentiles reliable</span>
+  </div>
+
+</div>
+
+<script>
+  const params   = new URLSearchParams(window.location.search);
+  const METHOD   = params.get('method');
+  const ENDPOINT = params.get('endpoint');
+
+  function fmt(ms) {
+    if (ms === null || ms === undefined) return '—';
+    if (ms >= 1000) return (ms / 1000).toFixed(2) + 's';
+    if (ms >= 1)    return ms.toFixed(1) + 'ms';
+    return ms.toFixed(3) + 'ms';
+  }
+
+  function valClass(ms) {
+    if (ms > 500) return 'danger';
+    if (ms > 200) return 'warn';
+    return '';
+  }
+
+  function renderHeader(ep) {
+    document.getElementById('ep-header').innerHTML = `
+      <span class="method-badge method-${ep.method}">${ep.method}</span>
+      <span class="ep-title">${ep.endpoint}</span>`;
+    document.title = `${ep.method} ${ep.endpoint} — latency tracker`;
+  }
+
+  function renderStatCards(ep) {
+    const p = ep.percentiles;
+    const cards = [
+      { label: 'avg',      value: fmt(ep.avg_ms),          cls: valClass(ep.avg_ms) },
+      { label: 'p50',      value: p ? fmt(p.p50_ms) : '—', cls: p ? valClass(p.p50_ms) : '' },
+      { label: 'p95',      value: p ? fmt(p.p95_ms) : '—', cls: p ? valClass(p.p95_ms) : '' },
+      { label: 'p99',      value: p ? fmt(p.p99_ms) : '—', cls: p ? valClass(p.p99_ms) : '' },
+      { label: 'requests', value: ep.total_requests,        cls: '' },
+      { label: 'errors',   value: ep.error_count,           cls: ep.error_count > 0 ? 'danger' : '' },
+    ];
+
+    document.getElementById('stat-cards').innerHTML = cards.map(c => `
+      <div class="stat-card">
+        <div class="stat-label">${c.label}</div>
+        <div class="stat-value ${c.cls}">${c.value}</div>
+      </div>`).join('');
+  }
+
+  function renderDegradationBanner(ep) {
+    const d  = ep.degradation;
+    const el = document.getElementById('degradation-banner');
+
+    if (!d) {
+      el.innerHTML = `<div class="degradation-banner ok">
+        <div class="banner-title">insufficient data for trend analysis</div>
+        <div class="banner-detail">need requests in both the last 10min and last 24h windows.</div>
+      </div>`;
+      return;
+    }
+
+    const pct       = d.change_pct;
+    const abs       = Math.abs(pct).toFixed(1);
+    const direction = pct > 0 ? 'increased' : 'decreased';
+    const cls       = ep.status === 'degraded' ? 'degraded' : ep.status === 'warning' ? 'warning' : 'ok';
+    const recentSamples   = d.recent_sample_size   || 0;
+    const baselineSamples = d.baseline_sample_size || 0;
+
+    let causeHint = '';
+    if (pct > 50) causeHint = 'possible causes: db connection pool exhaustion, table scan without index, memory pressure, infra throttling.';
+    else if (pct > 20) causeHint = 'possible causes: increased load, gradual query degradation, growing table size.';
+
+    el.innerHTML = `<div class="degradation-banner ${cls}">
+      <div class="banner-title">${pct > 0 ? '↑' : '↓'} ${abs}% — avg latency ${direction} vs 24h baseline</div>
+      <div class="banner-detail">recent 10min avg: ${fmt(d.recent_avg_ms)} · 24h baseline avg: ${fmt(d.baseline_avg_ms)} · recent samples: ${recentSamples} · baseline samples: ${baselineSamples}</div>
+      ${causeHint ? `<div class="banner-detail" style="margin-top:0.25rem">${causeHint}</div>` : ''}
+    </div>`;
+  }
+
+  function renderCharts(ep) {
+    const trend     = ep.hourly_trend          || [];
+    const errorRate = ep.error_rate_over_time  || [];
+
+    const gridColor = '#e2e0db';
+    const tickColor = '#9a9890';
+
+    const chartDefaults = {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: { legend: { display: false } },
+      scales: {
+        x: {
+          ticks: { color: tickColor, font: { family: 'monospace', size: 10 }, maxRotation: 0 },
+          grid:  { color: gridColor }
+        },
+        y: {
+          ticks: { color: tickColor, font: { family: 'monospace', size: 10 } },
+          grid:  { color: gridColor }
+        }
+      }
+    };
+
+    // latency chart
+    const latencyLabels = trend.map(r => r.hour.slice(11, 16));
+    const latencyData   = trend.map(r => parseFloat(r.avg_ms.toFixed(2)));
+
+    new Chart(document.getElementById('latency-chart'), {
+      type: 'bar',
+      data: {
+        labels: latencyLabels,
+        datasets: [{
+          data: latencyData,
+          backgroundColor: latencyData.map(v =>
+            v > 500 ? 'rgba(176,48,48,0.55)' :
+            v > 200 ? 'rgba(146,100,10,0.5)' :
+                      'rgba(74,85,104,0.5)'
+          ),
+          borderRadius: 3,
+          borderSkipped: false,
+        }]
+      },
+      options: {
+        ...chartDefaults,
+        plugins: {
+          ...chartDefaults.plugins,
+          tooltip: { callbacks: { label: ctx => fmt(ctx.raw) } }
+        },
+        scales: {
+          ...chartDefaults.scales,
+          y: { ...chartDefaults.scales.y, ticks: { ...chartDefaults.scales.y.ticks, callback: v => fmt(v) } }
+        }
+      }
+    });
+
+    // error rate chart
+    const errLabels = errorRate.map(r => r.hour.slice(11, 16));
+    const errData   = errorRate.map(r => parseFloat(r.error_rate_pct));
+
+    new Chart(document.getElementById('error-chart'), {
+      type: 'bar',
+      data: {
+        labels: errLabels,
+        datasets: [{
+          data: errData,
+          backgroundColor: errData.map(v =>
+            v > 10 ? 'rgba(176,48,48,0.65)' :
+            v > 0  ? 'rgba(146,100,10,0.5)' :
+                     'rgba(45,122,79,0.45)'
+          ),
+          borderRadius: 3,
+          borderSkipped: false,
+        }]
+      },
+      options: {
+        ...chartDefaults,
+        plugins: {
+          ...chartDefaults.plugins,
+          tooltip: { callbacks: { label: ctx => ctx.raw.toFixed(1) + '%' } }
+        },
+        scales: {
+          ...chartDefaults.scales,
+          y: { ...chartDefaults.scales.y, ticks: { ...chartDefaults.scales.y.ticks, callback: v => v + '%' }, min: 0 }
+        }
+      }
+    });
+  }
+
+  function renderSampleInfo(ep) {
+    const p        = ep.percentiles;
+    const reliable = p && p.percentiles_reliable;
+    document.getElementById('sample-info').innerHTML = `
+      <span><strong>${ep.total_requests}</strong>total requests</span>
+      <span><strong style="color:${ep.error_count > 0 ? 'var(--danger)' : 'inherit'}">${ep.error_count}</strong>errors</span>
+      <span><strong>${p ? p.sample_size : '—'}</strong>samples (tdigest)</span>
+      <span><strong style="color:${reliable ? 'var(--ok)' : 'var(--warn)'}">${reliable ? 'yes' : 'no — below 100'}</strong>percentiles reliable</span>`;
+  }
+
+  async function loadDetail() {
+    if (!METHOD || !ENDPOINT) {
+      document.getElementById('ep-header').innerHTML =
+        '<span class="error-state">missing method or endpoint param</span>';
+      return;
+    }
+
+    try {
+      const res  = await fetch('/latency/health');
+      const data = await res.json();
+      const ep   = (data.endpoints || []).find(
+        e => e.method === METHOD && e.endpoint === ENDPOINT
+      );
+
+      if (!ep) {
+        document.getElementById('ep-header').innerHTML =
+          `<span style="color:var(--danger); font-family:var(--font-mono); font-size:13px;">endpoint not found: ${METHOD} ${ENDPOINT}</span>`;
+        return;
+      }
+
+      renderHeader(ep);
+      renderStatCards(ep);
+      renderDegradationBanner(ep);
+      renderCharts(ep);
+      renderSampleInfo(ep);
+
+    } catch (err) {
+      document.getElementById('ep-header').innerHTML =
+        '<span style="color:var(--danger); font-family:var(--font-mono); font-size:13px;">failed to load data</span>';
+    }
+  }
+
+  loadDetail();
+</script>
+</body>
+</html>
