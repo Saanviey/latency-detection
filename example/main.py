@@ -1,15 +1,24 @@
 from fastapi import FastAPI
-from latency_tracker import LatencyMiddleware, latency_router, init_db
+from latency_tracker import LatencyMiddleware, latency_router, init_db, startup ,shutdown
 import asyncio 
 import random
+from contextlib import asynccontextmanager
 
-app = FastAPI()
+#Everything before yield runs on startup, everything after runs on shutdown.
+@asynccontextmanager
+async def lifespan(app):
+    startup()
+    yield
+    shutdown()
+
+app = FastAPI(lifespan=lifespan)
+
 
 init_db()  # creates the SQLite table on startup
 app.add_middleware(LatencyMiddleware)
 app.include_router(latency_router)
 
-# some dummy endpoints to generate traffic
+#dummy endpoints to generate traffic
 @app.get("/posts")
 async def get_posts():
     return {"posts": ["post1", "post2"]}

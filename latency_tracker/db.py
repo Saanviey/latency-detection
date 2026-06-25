@@ -1,6 +1,7 @@
 import sqlite3
 import os
 from datetime import datetime
+import pickle
 
 DB_PATH = os.path.join(os.path.dirname(__file__), "metrics.db")
 
@@ -8,6 +9,7 @@ def get_connection():
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     return conn
+
 
 def init_db():
     conn = get_connection()
@@ -18,11 +20,18 @@ def init_db():
             method TEXT NOT NULL,
             status_code INTEGER NOT NULL,
             response_time_ms REAL NOT NULL,
-            timestamp TEXT NOT NULL
-        )
+            timestamp TEXT NOT NULL)
+        """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS digest_snapshots (
+        method TEXT,
+        endpoint TEXT,
+        blob BLOB,
+         PRIMARY KEY (method, endpoint))
     """)
     conn.commit()
     conn.close()
+
 
 def insert_request(endpoint, method, status_code, response_time_ms):
     conn = get_connection()
@@ -48,6 +57,7 @@ def get_slowest_endpoints(limit=5):
     """, (limit,)).fetchall()
     conn.close()
     return [dict(row) for row in rows]
+
 
 def get_degradation(endpoint, method):
     conn = get_connection()
@@ -79,3 +89,30 @@ def get_degradation(endpoint, method):
         "baseline_avg_ms": round(baseline, 2),
         "change_pct": round(change_pct, 2)
     }
+
+#tdigest persistence 
+#save digest as a binary blob using pickle
+def save_digests(digest_map):
+    conn = get_connection()
+    for (method, endpoint), digest in digest_map.items():
+        conn.execute("""
+            INSERT OR REPLACE INTO digest_snapshots (method, endpoint, blob)
+            VALUES (?, ?, ?)
+        """, (method, endpoint, pickle.dumps(digest)))
+    conn.commit()
+    conn.close()
+
+
+#fetch and load digest blob 
+def load_digests():
+    conn = get_connection()
+    # fetch all saved rows from the persistence table
+    rows = conn.execute("SELECT method, endpoint, blob FROM digest_snapshots").fetchall()
+    conn.close()
+    
+    digest_map = {}  # temporary local dict, not the module-level one
+    for row in rows:
+        key = (row["method"], row["endpoint"])  # rebuild the tuple key
+        digest_map[key] = pickle.loads(row["blob"])  # unpickle blob back into TDigest object
+    
+    return digest_map  # return the populated dict
