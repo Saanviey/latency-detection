@@ -1,6 +1,6 @@
 # latency_tracker
 
-python middleware library for FastAPI that tracks API endpoint latency with statistical percentiles, time-based degradation detection, a built-in dashboard, and an optional LLM summary layer.
+python middleware library for FastAPI that tracks API endpoint latency with statistical percentiles, time-based degradation detection, a built-in dashboard, and an LLM layer that provides a summary and suggests possible causes for issues faced.
 
 ---
 
@@ -13,7 +13,7 @@ python middleware library for FastAPI that tracks API endpoint latency with stat
 - **error rate tracking** — 5xx rate per hour, correlated with latency data
 - **sample size warnings** — percentiles flagged unreliable below 100 samples
 - **HTML dashboard** — sortable table, per-endpoint drill-down with charts, auto-refreshes
-- **LLM summary** — on-demand diagnosis via Groq, OpenAI, or Gemini. optional.
+- **LLM summary** — on-demand diagnosis via Groq, OpenAI, or Gemini.
 
 ---
 
@@ -61,4 +61,4 @@ visit `http://localhost:8000/latency/dashboard`.
 
 `groq` · `openai` · `gemini`
 
-LLM summary is optional — all statistical features work without it.
+LLM layer can give you more insights on the issues and works independently of the statistical tools.
